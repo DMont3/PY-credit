@@ -34,3 +34,6 @@ config.ini
 
 # Logs
 *.log
+
+*.png
+!data/raw/sample_data.csv
