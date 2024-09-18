@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import tkinter as tk
+from tkinter import ttk
+from tkinter import messagebox
+from datetime import datetime
 
 # Bibliotecas de Machine Learning
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -11,10 +15,10 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 
 # Suprimir avisos
 import warnings
@@ -35,7 +39,7 @@ os.makedirs(data_dir, exist_ok=True)
 os.makedirs(figures_dir, exist_ok=True)
 
 # Caminho completo para o arquivo CSV de entrada
-input_csv_path = os.path.join(data_dir, 'credit_requests.csv')
+input_csv_path = os.path.join(data_dir, 'sample_data.csv')
 
 # Carregar o dataset
 df = pd.read_csv(input_csv_path, encoding='utf-8')  # Caminho ajustado para a pasta 'data'
@@ -68,9 +72,9 @@ for col in colunas_data:
         dados[col] = pd.to_datetime(dados[col], errors='coerce')
 
 # Engenharia de atributos: criar novas features
-ano_atual = pd.to_datetime('today').year
+ano_atual = datetime.today().year
 dados['idade_empresa'] = ano_atual - dados['anoFundacao']
-dados['dias_desde_primeira_compra'] = (pd.to_datetime('today') - dados['primeiraCompra']).dt.days
+dados['dias_desde_primeira_compra'] = (datetime.today() - dados['primeiraCompra']).dt.days
 
 # Tratar variáveis categóricas usando um LabelEncoder por coluna
 colunas_categoricas = ['status', 'definicaoRisco', 'intervaloFundacao']
@@ -94,8 +98,9 @@ colunas_remover = [
 ]
 dados = dados.drop(columns=colunas_remover, errors='ignore')
 
-# Tratar valores nulos restantes preenchendo com zero
-dados = dados.fillna(0)
+# Tratar valores nulos restantes usando imputação com a mediana
+imputer = SimpleImputer(strategy='median')
+dados = pd.DataFrame(imputer.fit_transform(dados), columns=dados.columns)
 
 # Verificar tipos de dados antes do escalonamento
 print("\nTipos de dados antes do escalonamento:")
@@ -141,8 +146,8 @@ cotovelo_path = os.path.join(figures_dir, 'metodo_cotovelo.png')
 plt.savefig(cotovelo_path)  # Salva na pasta 'figures'
 plt.show()
 
-# Baseado na curva, escolher k (por exemplo, k=4)
-k_otimo = 4
+# Escolher k
+k_otimo = 5
 kmeans = KMeans(n_clusters=k_otimo, random_state=42)
 dados['Grupo'] = kmeans.fit_predict(X_cluster)
 
@@ -193,9 +198,14 @@ X_treino, X_teste, y_treino, y_teste = train_test_split(
 
 # Construir um pipeline de classificação
 features_numericas = X.select_dtypes(include=['float64', 'int64']).columns
-transformador_numerico = Pipeline(steps=[('scaler', StandardScaler())])
+transformador_numerico = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler())
+])
 
-preprocessador = ColumnTransformer(transformers=[('num', transformador_numerico, features_numericas)])
+preprocessador = ColumnTransformer(transformers=[
+    ('num', transformador_numerico, features_numericas)
+])
 
 pipeline_clf = Pipeline(steps=[
     ('preprocessor', preprocessador),
@@ -250,39 +260,6 @@ importancia_features_path = os.path.join(figures_dir, 'importancia_features.png'
 plt.savefig(importancia_features_path)  # Salva na pasta 'figures'
 plt.show()
 
-# Função para classificar novos clientes
-def classificar_novo_cliente(novo_cliente):
-    novo_cliente_df = pd.DataFrame([novo_cliente])
-
-    # Tratar variáveis categóricas usando os LabelEncoders correspondentes
-    for col in colunas_categoricas:
-        if col in novo_cliente_df.columns:
-            le = label_encoders[col]
-            novo_cliente_df[col] = le.transform(novo_cliente_df[col].astype(str))
-
-    # Converter colunas booleanas que estão como strings
-    for col in colunas_booleanas:
-        if col in novo_cliente_df.columns:
-            novo_cliente_df[col] = novo_cliente_df[col].astype(str).map({'False': 0, 'True': 1, 'nan': 0})
-
-    # Engenharia de atributos
-    novo_cliente_df['idade_empresa'] = ano_atual - novo_cliente_df['anoFundacao']
-    novo_cliente_df['dias_desde_primeira_compra'] = (pd.to_datetime('today') - pd.to_datetime(novo_cliente_df['primeiraCompra'])).dt.days
-
-    # Remover colunas não usadas
-    colunas_remover = ['primeiraCompra', 'dataAprovadoNivelAnalista', 'dataAprovadoEmComite', 'periodoBalanco', 'anoFundacao']
-    novo_cliente_df = novo_cliente_df.drop(columns=colunas_remover, errors='ignore')
-
-    # Tratar valores nulos
-    novo_cliente_df = novo_cliente_df.fillna(0)
-
-    # Garantir que as colunas estejam na mesma ordem
-    novo_cliente_df = novo_cliente_df[X_treino.columns]
-
-    # Prever grupo
-    grupo_label = pipeline_clf.predict(novo_cliente_df)
-    return grupo_label[0]
-
 # Objetivo 3: Recomendação Automatizada de Crédito
 
 # Classificar as recomendações em categorias
@@ -327,16 +304,19 @@ X_treino_reg, X_teste_reg, y_treino_reg, y_teste_reg = train_test_split(
     X_reg, y_reg, test_size=0.2, random_state=42
 )
 
-# Construir um pipeline de regressão
+# Construir um pipeline de regressão usando RandomForestRegressor
 features_numericas_reg = X_reg.select_dtypes(include=['float64', 'int64']).columns
-transformador_numerico_reg = Pipeline(steps=[('scaler', StandardScaler())])
+transformador_numerico_reg = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler())
+])
 
 preprocessador_reg = ColumnTransformer(
     transformers=[('num', transformador_numerico_reg, features_numericas_reg)]
 )
 
 pipeline_reg = Pipeline(
-    steps=[('preprocessor', preprocessador_reg), ('regressor', LinearRegression())]
+    steps=[('preprocessor', preprocessador_reg), ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))]
 )
 
 # Treinar o pipeline
@@ -366,8 +346,40 @@ regressao_credito_path = os.path.join(figures_dir, 'regressao_credito.png')
 plt.savefig(regressao_credito_path)  # Salva na pasta 'figures'
 plt.show()
 
+# Função para classificar novos clientes
+def classificar_novo_cliente(novo_cliente):
+    # Converter o dicionário para DataFrame
+    novo_cliente_df = pd.DataFrame([novo_cliente])
+
+    # Tratar variáveis categóricas usando os LabelEncoders correspondentes
+    for col in colunas_categoricas:
+        if col in novo_cliente_df.columns:
+            le = label_encoders[col]
+            novo_cliente_df[col] = le.transform(novo_cliente_df[col].astype(str))
+
+    # Converter colunas booleanas que estão como strings
+    for col in colunas_booleanas:
+        if col in novo_cliente_df.columns:
+            novo_cliente_df[col] = novo_cliente_df[col].astype(str).map({'False': 0, 'True': 1, 'nan': 0})
+
+    # Engenharia de atributos
+    novo_cliente_df['idade_empresa'] = ano_atual - novo_cliente_df['anoFundacao']
+    novo_cliente_df['dias_desde_primeira_compra'] = (datetime.today() - pd.to_datetime(novo_cliente_df['primeiraCompra'])).dt.days
+
+    # Remover colunas não usadas
+    colunas_remover = ['primeiraCompra', 'dataAprovadoNivelAnalista', 'dataAprovadoEmComite', 'periodoBalanco', 'anoFundacao']
+    novo_cliente_df = novo_cliente_df.drop(columns=colunas_remover, errors='ignore')
+
+    # Garantir que as colunas estejam na mesma ordem
+    novo_cliente_df = novo_cliente_df[X_treino.columns]
+
+    # Prever grupo usando pipeline_clf
+    grupo_label = pipeline_clf.predict(novo_cliente_df)
+    return grupo_label[0]
+
 # Função para recomendar limite de crédito
 def recomendar_limite_credito(dados_cliente):
+    # Converter o dicionário para DataFrame
     cliente_df = pd.DataFrame([dados_cliente])
 
     # Tratar variáveis categóricas usando os LabelEncoders correspondentes
@@ -383,21 +395,22 @@ def recomendar_limite_credito(dados_cliente):
 
     # Engenharia de atributos
     cliente_df['idade_empresa'] = ano_atual - cliente_df['anoFundacao']
-    cliente_df['dias_desde_primeira_compra'] = (pd.to_datetime('today') - pd.to_datetime(cliente_df['primeiraCompra'])).dt.days
+    cliente_df['dias_desde_primeira_compra'] = (datetime.today() - pd.to_datetime(cliente_df['primeiraCompra'])).dt.days
 
     # Remover colunas não usadas
     colunas_remover = ['primeiraCompra', 'dataAprovadoNivelAnalista', 'dataAprovadoEmComite', 'periodoBalanco', 'anoFundacao']
     cliente_df = cliente_df.drop(columns=colunas_remover, errors='ignore')
 
-    # Tratar valores nulos
-    cliente_df = cliente_df.fillna(0)
-
     # Garantir que as colunas estejam na mesma ordem
     cliente_df = cliente_df[X_reg.columns]
 
-    # Prever limite de crédito
-    limite_previsto = pipeline_reg.predict(cliente_df)
-    return limite_previsto[0]
+    # Prever limite de crédito usando pipeline_reg
+    limite_previsto = pipeline_reg.predict(cliente_df)[0]
+
+    # Aplicar limites realistas
+    limite_previsto = max(0, min(limite_previsto, 150000))  # Limitar entre 0 e 150.000 Reais
+
+    return limite_previsto
 
 # Gerar um arquivo CSV com as recomendações
 df_recomendacoes = df.copy()
@@ -441,10 +454,6 @@ distribuicao_limites_path = os.path.join(figures_dir, 'distribuicao_limites.png'
 plt.savefig(distribuicao_limites_path)  # Salva na pasta 'figures'
 plt.show()
 
-# 2. REMOVIDO: Boxplot dos Limites de Crédito Aprovados
-
-# 3. Gráfico de Importância das Features (já implementado acima)
-
 # Exemplo de uso das funções de classificação e recomendação
 
 # Dados de um novo cliente
@@ -454,7 +463,7 @@ novo_cliente_dados = {
     'percentualProtestos': 0.1,
     'prazoMedioRecebimentoVendas': 30,
     'titulosEmAberto': 5000.0,
-    'valorSolicitado': 20000.0,
+    'valorSolicitado': 200000.0,
     'status': 'AprovadoAnalista',
     'definicaoRisco': 'De 11 a 30 % - Baixo',
     'percentualRisco': 0.2,
@@ -486,4 +495,109 @@ print(f"O novo cliente pertence ao Grupo: {grupo_novo_cliente}")
 # Recomendar limite de crédito para o novo cliente
 limite_novo_cliente = recomendar_limite_credito(novo_cliente_dados)
 categoria_limite = categorizar_limite_credito(limite_novo_cliente)
-print(f"Limite de Crédito Recomendado: R$ {limite_novo_cliente:.2f} - Categoria: {categoria_limite}")
+print(f"Limite de Crédito Recomendado: R$ {limite_novo_cliente:,.2f} - Categoria: {categoria_limite}")
+
+# Adição da GUI
+def criar_gui():
+    # Inicializar a janela principal
+    janela = tk.Tk()
+    janela.title("Previsão de Limite de Crédito")
+    janela.geometry("600x1000")
+    janela.resizable(False, False)
+
+    # Título da aplicação
+    titulo = ttk.Label(janela, text="Recomendação de Limite de Crédito", font=("Arial", 16))
+    titulo.pack(pady=10)
+
+    # Frame para os dados já escritos
+    frame_dados = ttk.LabelFrame(janela, text="Dados do Cliente")
+    frame_dados.pack(padx=10, pady=10, fill="both", expand=True)
+
+    # Exemplo de dados (pode ser adaptado conforme necessário)
+    labels = [
+        "Maior Atraso:",
+        "Margem Bruta Acumulada:",
+        "Percentual Protestos:",
+        "Prazo Médio Recebimento Vendas:",
+        "Títulos em Aberto:",
+        "Valor Solicitado:",
+        "Status:",
+        "Definição de Risco:",
+        "Percentual de Risco:",
+        "Ativo Circulante:",
+        "Passivo Circulante:",
+        "Total Ativo:",
+        "Total Patrimônio Líquido:",
+        "Endividamento:",
+        "Duplicatas a Receber:",
+        "Estoque:",
+        "Faturamento Bruto:",
+        "Margem Bruta:",
+        "Período Demonstrativo (meses):",
+        "Custos:",
+        "Intervalo de Fundação:",
+        "Capital Social:",
+        "Restrições:",
+        "Empresa Me/EPP/MEI:",
+        "Score Pontualidade:",
+        "Limite Empresa Análise de Crédito:",
+        "Primeira Compra:",
+        "Ano de Fundação:"
+    ]
+
+    valores = [
+        novo_cliente_dados['maiorAtraso'],
+        novo_cliente_dados['margemBrutaAcumulada'],
+        novo_cliente_dados['percentualProtestos'],
+        novo_cliente_dados['prazoMedioRecebimentoVendas'],
+        novo_cliente_dados['titulosEmAberto'],
+        novo_cliente_dados['valorSolicitado'],
+        novo_cliente_dados['status'],
+        novo_cliente_dados['definicaoRisco'],
+        novo_cliente_dados['percentualRisco'],
+        novo_cliente_dados['ativoCirculante'],
+        novo_cliente_dados['passivoCirculante'],
+        novo_cliente_dados['totalAtivo'],
+        novo_cliente_dados['totalPatrimonioLiquido'],
+        novo_cliente_dados['endividamento'],
+        novo_cliente_dados['duplicatasAReceber'],
+        novo_cliente_dados['estoque'],
+        novo_cliente_dados['faturamentoBruto'],
+        novo_cliente_dados['margemBruta'],
+        novo_cliente_dados['periodoDemonstrativoEmMeses'],
+        novo_cliente_dados['custos'],
+        novo_cliente_dados['intervaloFundacao'],
+        novo_cliente_dados['capitalSocial'],
+        novo_cliente_dados['restricoes'],
+        novo_cliente_dados['empresa_MeEppMei'],
+        novo_cliente_dados['scorePontualidade'],
+        novo_cliente_dados['limiteEmpresaAnaliseCredito'],
+        novo_cliente_dados['primeiraCompra'],  # Exibido diretamente como string
+        int(novo_cliente_dados['anoFundacao'])  # Convertido para inteiro para melhor exibição
+    ]
+
+    # Criar labels para dados
+    for i in range(len(labels)):
+        lbl = ttk.Label(frame_dados, text=f"{labels[i]} {valores[i]}", wraplength=550, justify='left')
+        lbl.pack(anchor='w', padx=10, pady=2)
+
+    # Frame para a recomendação
+    frame_prev = ttk.LabelFrame(janela, text="Limite de Crédito Recomendado")
+    frame_prev.pack(padx=10, pady=10, fill="both", expand=True)
+
+    # Exibir a recomendação fixa
+    lbl_limite = ttk.Label(frame_prev, text=f"Limite de Crédito: R$ {limite_novo_cliente:,.2f}", font=("Arial", 12))
+    lbl_limite.pack(pady=5)
+
+    lbl_categoria = ttk.Label(frame_prev, text=f"Categoria: {categoria_limite}", font=("Arial", 12))
+    lbl_categoria.pack(pady=5)
+
+    # Botão para sair
+    btn_sair = ttk.Button(janela, text="Sair", command=janela.destroy)
+    btn_sair.pack(pady=10)
+
+    # Executar a janela
+    janela.mainloop()
+
+# Chamar a função para criar a GUI
+criar_gui()

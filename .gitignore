@@ -24,6 +24,8 @@ share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.ipynb_checkpoints
+.ipynb
 
 # PyInstaller
 #  Normally these files are written by a python script from a template
@@ -121,11 +123,10 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# Figures and generated plots
-figures/
 
 # Dados processados
-data/
+.csv
+.png
 
 # Arquivos de configuração do sistema operacional
 .DS_Store
